@@ -1,4 +1,5 @@
 import React, { useState, useEffect } from 'react';
+import axios from 'axios';
 import { 
   LayoutDashboard, 
   Package, 
@@ -235,10 +236,9 @@ const MasterDataModule = () => {
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
-    fetch('/api/products')
-      .then(res => res.json())
-      .then(data => {
-        setProducts(data);
+    axios.get('/api/products')
+      .then(res => {
+        setProducts(res.data);
         setLoading(false);
       });
   }, []);
@@ -295,9 +295,8 @@ const CRMModule = () => {
   const [leads, setLeads] = useState<Lead[]>([]);
 
   useEffect(() => {
-    fetch('/api/leads')
-      .then(res => res.json())
-      .then(setLeads);
+    axios.get('/api/leads')
+      .then(res => setLeads(res.data));
   }, []);
 
   const stages = ['NEW', 'CONTACTED', 'QUALIFIED', 'PROPOSAL', 'WON', 'LOST'];
@@ -356,9 +355,8 @@ export default function App() {
   const [stats, setStats] = useState<DashboardStats | null>(null);
 
   useEffect(() => {
-    fetch('/api/dashboard/stats')
-      .then(res => res.json())
-      .then(setStats);
+    axios.get('/api/dashboard/stats')
+      .then(res => setStats(res.data));
   }, []);
 
   const renderModule = () => {
@@ -386,14 +384,17 @@ export default function App() {
         <Header title={activeModule} />
         
         <div className="flex-1 overflow-y-auto p-8">
-          <motion.div
-            key={activeModule}
-            initial={{ opacity: 0, y: 10 }}
-            animate={{ opacity: 1, y: 0 }}
-            transition={{ duration: 0.3 }}
-          >
-            {renderModule()}
-          </motion.div>
+          <AnimatePresence mode="wait">
+            <motion.div
+              key={activeModule}
+              initial={{ opacity: 0, y: 10 }}
+              animate={{ opacity: 1, y: 0 }}
+              exit={{ opacity: 0, y: -10 }}
+              transition={{ duration: 0.2 }}
+            >
+              {renderModule()}
+            </motion.div>
+          </AnimatePresence>
         </div>
       </main>
     </div>
