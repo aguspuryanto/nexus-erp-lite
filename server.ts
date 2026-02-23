@@ -182,13 +182,116 @@ async function startServer() {
   });
 
   app.get("/api/transactions", (req, res) => {
-    const transactions = db.prepare(`
+    const type = req.query.type;
+    let query = `
       SELECT t.*, p.name as partner_name 
       FROM transactions t 
       LEFT JOIN partners p ON t.partner_id = p.id
-      ORDER BY t.date DESC
-    `).all();
+    `;
+    const params: any[] = [];
+    
+    if (type) {
+      query += " WHERE t.type = ?";
+      params.push(type);
+    }
+    
+    query += " ORDER BY t.date DESC";
+    
+    const transactions = db.prepare(query).all(...params);
     res.json(transactions);
+  });
+
+  app.get("/api/transactions/:id/items", (req, res) => {
+    const items = db.prepare(`
+      SELECT ti.*, p.name as product_name, p.code as product_code
+      FROM transaction_items ti
+      JOIN products p ON ti.product_id = p.id
+      WHERE ti.transaction_id = ?
+    `).all(req.params.id);
+    res.json(items);
+  });
+
+  app.post("/api/transactions", (req, res) => {
+    const { type, number, date, partner_id, status, total_amount, items } = req.body;
+    
+    const insertTransaction = db.prepare(`
+      INSERT INTO transactions (type, number, date, partner_id, status, total_amount)
+      VALUES (?, ?, ?, ?, ?, ?)
+    `);
+    
+    const insertItem = db.prepare(`
+      INSERT INTO transaction_items (transaction_id, product_id, qty, price, subtotal)
+      VALUES (?, ?, ?, ?, ?)
+    `);
+
+    const transaction = db.transaction(() => {
+      const result = insertTransaction.run(type, number, date, partner_id, status, total_amount);
+      const transactionId = result.lastInsertRowid;
+      
+      for (const item of items) {
+        insertItem.run(transactionId, item.product_id, item.qty, item.price, item.subtotal);
+      }
+      
+      return transactionId;
+    });
+
+    try {
+      const id = transaction();
+      res.json({ id, number });
+    } catch (error: any) {
+      res.status(400).json({ error: error.message });
+    }
+  });
+
+  app.put("/api/transactions/:id", (req, res) => {
+    const { status, total_amount, items } = req.body;
+    const id = req.params.id;
+
+    const updateTransaction = db.prepare(`
+      UPDATE transactions SET status = ?, total_amount = ? WHERE id = ?
+    `);
+
+    const deleteItems = db.prepare("DELETE FROM transaction_items WHERE transaction_id = ?");
+    const insertItem = db.prepare(`
+      INSERT INTO transaction_items (transaction_id, product_id, qty, price, subtotal)
+      VALUES (?, ?, ?, ?, ?)
+    `);
+
+    const transaction = db.transaction(() => {
+      updateTransaction.run(status, total_amount, id);
+      
+      if (items) {
+        deleteItems.run(id);
+        for (const item of items) {
+          insertItem.run(id, item.product_id, item.qty, item.price, item.subtotal);
+        }
+      }
+    });
+
+    try {
+      transaction();
+      res.json({ success: true });
+    } catch (error: any) {
+      res.status(400).json({ error: error.message });
+    }
+  });
+
+  app.delete("/api/transactions/:id", (req, res) => {
+    const id = req.params.id;
+    const deleteItems = db.prepare("DELETE FROM transaction_items WHERE transaction_id = ?");
+    const deleteTransaction = db.prepare("DELETE FROM transactions WHERE id = ?");
+
+    const transaction = db.transaction(() => {
+      deleteItems.run(id);
+      deleteTransaction.run(id);
+    });
+
+    try {
+      transaction();
+      res.json({ success: true });
+    } catch (error: any) {
+      res.status(400).json({ error: error.message });
+    }
   });
 
   app.get("/api/employees", (req, res) => {

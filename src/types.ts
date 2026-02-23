@@ -38,6 +38,17 @@ export interface Transaction {
   total_amount: number;
 }
 
+export interface TransactionItem {
+  id: number;
+  transaction_id: number;
+  product_id: number;
+  product_name: string;
+  product_code: string;
+  qty: number;
+  price: number;
+  subtotal: number;
+}
+
 export interface Employee {
   id: number;
   name: string;
