@@ -51,6 +51,17 @@ export interface TransactionItem {
   subtotal: number;
 }
 
+export interface StockMovement {
+  id: number;
+  product_id: number;
+  product_name: string;
+  product_code: string;
+  type: 'IN' | 'OUT' | 'ADJUSTMENT';
+  qty: number;
+  reference: string;
+  date: string;
+}
+
 export interface Employee {
   id: number;
   name: string;

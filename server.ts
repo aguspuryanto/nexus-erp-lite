@@ -132,6 +132,16 @@ db.exec(`
     timestamp DATETIME DEFAULT CURRENT_TIMESTAMP
   );
 
+  CREATE TABLE IF NOT EXISTS stock_movements (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    product_id INTEGER,
+    type TEXT NOT NULL, -- IN, OUT, ADJUSTMENT
+    qty REAL NOT NULL,
+    reference TEXT,
+    date DATETIME DEFAULT CURRENT_TIMESTAMP,
+    FOREIGN KEY(product_id) REFERENCES products(id)
+  );
+
   -- Migration: Add employee_id to transactions if not exists
   PRAGMA foreign_keys=off;
   BEGIN TRANSACTION;
@@ -280,6 +290,8 @@ async function startServer() {
     const { status, total_amount, items } = req.body;
     const id = req.params.id;
 
+    const getTransaction = db.prepare("SELECT * FROM transactions WHERE id = ?");
+    const getItems = db.prepare("SELECT * FROM transaction_items WHERE transaction_id = ?");
     const updateTransaction = db.prepare(`
       UPDATE transactions SET status = ?, total_amount = ? WHERE id = ?
     `);
@@ -290,13 +302,49 @@ async function startServer() {
       VALUES (?, ?, ?, ?, ?)
     `);
 
+    const insertMovement = db.prepare(`
+      INSERT INTO stock_movements (product_id, type, qty, reference)
+      VALUES (?, ?, ?, ?)
+    `);
+    
+    const updateStock = db.prepare(`
+      UPDATE products SET stock_qty = stock_qty + ? WHERE id = ?
+    `);
+
     const transaction = db.transaction(() => {
+      const oldTransaction = getTransaction.get(id) as any;
+      const oldStatus = oldTransaction.status;
+      
       updateTransaction.run(status, total_amount, id);
       
       if (items) {
         deleteItems.run(id);
         for (const item of items) {
           insertItem.run(id, item.product_id, item.qty, item.price, item.subtotal);
+        }
+      }
+
+      // Handle Stock Movement if status changed to COMPLETED
+      if (oldStatus !== 'COMPLETED' && status === 'COMPLETED') {
+        const currentItems = items || getItems.all(id);
+        const type = oldTransaction.type;
+        
+        for (const item of currentItems) {
+          let movementType = '';
+          let qtyChange = 0;
+          
+          if (['PO', 'INVOICE_IN'].includes(type)) {
+            movementType = 'IN';
+            qtyChange = item.qty;
+          } else if (['SO', 'INVOICE_OUT'].includes(type)) {
+            movementType = 'OUT';
+            qtyChange = -item.qty;
+          }
+          
+          if (movementType) {
+            insertMovement.run(item.product_id, movementType, item.qty, oldTransaction.number);
+            updateStock.run(qtyChange, item.product_id);
+          }
         }
       }
     });
@@ -335,6 +383,43 @@ async function startServer() {
   app.get("/api/leads", (req, res) => {
     const leads = db.prepare("SELECT * FROM leads").all();
     res.json(leads);
+  });
+
+  // Inventory API
+  app.get("/api/inventory/movements", (req, res) => {
+    const movements = db.prepare(`
+      SELECT sm.*, p.name as product_name, p.code as product_code
+      FROM stock_movements sm
+      JOIN products p ON sm.product_id = p.id
+      ORDER BY sm.date DESC
+    `).all();
+    res.json(movements);
+  });
+
+  app.post("/api/inventory/adjustments", (req, res) => {
+    const { product_id, type, qty, reference } = req.body;
+    
+    const insertMovement = db.prepare(`
+      INSERT INTO stock_movements (product_id, type, qty, reference)
+      VALUES (?, ?, ?, ?)
+    `);
+    
+    const updateStock = db.prepare(`
+      UPDATE products SET stock_qty = stock_qty + ? WHERE id = ?
+    `);
+
+    const transaction = db.transaction(() => {
+      insertMovement.run(product_id, type, qty, reference);
+      const adjustmentQty = type === 'OUT' ? -qty : qty;
+      updateStock.run(adjustmentQty, product_id);
+    });
+
+    try {
+      transaction();
+      res.json({ success: true });
+    } catch (error: any) {
+      res.status(400).json({ error: error.message });
+    }
   });
 
   // Vite middleware for development
