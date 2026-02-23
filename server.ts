@@ -64,9 +64,11 @@ db.exec(`
     number TEXT UNIQUE NOT NULL,
     date DATE NOT NULL,
     partner_id INTEGER,
+    employee_id INTEGER,
     status TEXT DEFAULT 'DRAFT',
     total_amount REAL DEFAULT 0,
-    FOREIGN KEY(partner_id) REFERENCES partners(id)
+    FOREIGN KEY(partner_id) REFERENCES partners(id),
+    FOREIGN KEY(employee_id) REFERENCES employees(id)
   );
 
   CREATE TABLE IF NOT EXISTS transaction_items (
@@ -129,7 +131,37 @@ db.exec(`
     details TEXT,
     timestamp DATETIME DEFAULT CURRENT_TIMESTAMP
   );
+
+  -- Migration: Add employee_id to transactions if not exists
+  PRAGMA foreign_keys=off;
+  BEGIN TRANSACTION;
+  CREATE TABLE IF NOT EXISTS transactions_new (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    type TEXT NOT NULL,
+    number TEXT UNIQUE NOT NULL,
+    date DATE NOT NULL,
+    partner_id INTEGER,
+    employee_id INTEGER,
+    status TEXT DEFAULT 'DRAFT',
+    total_amount REAL DEFAULT 0,
+    FOREIGN KEY(partner_id) REFERENCES partners(id),
+    FOREIGN KEY(employee_id) REFERENCES employees(id)
+  );
+  
+  -- Check if employee_id exists in transactions
+  -- If it doesn't, this will fail or we can do it more safely
+  -- Since better-sqlite3 doesn't support easy column check in SQL, we'll try a simpler approach
+  -- Actually, in this environment, I can just drop and recreate or just use ALTER TABLE
+  -- Let's use a safer way to add the column
+COMMIT;
+PRAGMA foreign_keys=on;
 `);
+
+try {
+  db.exec("ALTER TABLE transactions ADD COLUMN employee_id INTEGER REFERENCES employees(id)");
+} catch (e) {
+  // Column already exists or table doesn't exist yet
+}
 
 // Seed initial data if empty
 const productCount = db.prepare("SELECT count(*) as count FROM products").get() as { count: number };
@@ -184,9 +216,10 @@ async function startServer() {
   app.get("/api/transactions", (req, res) => {
     const type = req.query.type;
     let query = `
-      SELECT t.*, p.name as partner_name 
+      SELECT t.*, p.name as partner_name, e.name as employee_name
       FROM transactions t 
       LEFT JOIN partners p ON t.partner_id = p.id
+      LEFT JOIN employees e ON t.employee_id = e.id
     `;
     const params: any[] = [];
     
@@ -212,11 +245,11 @@ async function startServer() {
   });
 
   app.post("/api/transactions", (req, res) => {
-    const { type, number, date, partner_id, status, total_amount, items } = req.body;
+    const { type, number, date, partner_id, employee_id, status, total_amount, items } = req.body;
     
     const insertTransaction = db.prepare(`
-      INSERT INTO transactions (type, number, date, partner_id, status, total_amount)
-      VALUES (?, ?, ?, ?, ?, ?)
+      INSERT INTO transactions (type, number, date, partner_id, employee_id, status, total_amount)
+      VALUES (?, ?, ?, ?, ?, ?, ?)
     `);
     
     const insertItem = db.prepare(`
@@ -225,7 +258,7 @@ async function startServer() {
     `);
 
     const transaction = db.transaction(() => {
-      const result = insertTransaction.run(type, number, date, partner_id, status, total_amount);
+      const result = insertTransaction.run(type, number, date, partner_id, employee_id, status, total_amount);
       const transactionId = result.lastInsertRowid;
       
       for (const item of items) {

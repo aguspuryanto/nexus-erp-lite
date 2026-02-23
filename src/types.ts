@@ -34,6 +34,8 @@ export interface Transaction {
   date: string;
   partner_id: number;
   partner_name?: string;
+  employee_id?: number;
+  employee_name?: string;
   status: string;
   total_amount: number;
 }
