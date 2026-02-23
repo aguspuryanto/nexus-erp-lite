@@ -1,0 +1,5 @@
+{
+  "name": "NexusERP - Enterprise Resource Planning",
+  "description": "A comprehensive web-based ERP system featuring modules for Sales, Purchasing, Inventory, Accounting, HRD, CRM, and CMS with multi-company support.",
+  "requestFramePermissions": []
+}
